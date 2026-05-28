@@ -979,8 +979,11 @@ public class EmiScreenManager {
 			ScreenSpace space = panel.getHoveredSpace(mx, my);
 			if (space != null && space.getType() == SidebarType.BOOKMARKS) {
 				EmiStackInteraction hovered = getHoveredStack(mx, my, true);
+				Long displayedBatches = hovered.getRecipeContext() == null
+					? null
+					: EmiBookmarks.getDisplayedBatch(hovered.getRecipeContext(), space);
 				if ((EmiInput.isControlDown() || EmiInput.isShiftDown()) && hovered.getRecipeContext() != null
-						&& EmiBookmarks.adjustBatch(hovered.getRecipeContext(), sa, EmiInput.isAltDown())) {
+						&& EmiBookmarks.adjustBatch(hovered.getRecipeContext(), sa, EmiInput.isAltDown(), displayedBatches)) {
 					repopulatePanels(SidebarType.BOOKMARKS);
 				}
 				// Bookmarks pages are explicit via header controls; wheel never flips pages here.

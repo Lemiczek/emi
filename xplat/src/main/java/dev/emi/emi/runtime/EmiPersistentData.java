@@ -18,9 +18,7 @@ public class EmiPersistentData {
 		try {
 			JsonObject json = new JsonObject();
 			json.add("favorites", EmiFavorites.save());
-			json.add("bookmark_counts", EmiBookmarks.saveCounts());
-			json.add("bookmark_pages", EmiBookmarks.savePages());
-			json.add("bookmark_order", EmiBookmarks.saveOrder());
+			json.add("bookmark_pages", EmiBookmarks.savePagesData());
 			json.addProperty("bookmark_page", EmiBookmarks.getCurrentPage());
 			EmiSidebars.save(json);
 			json.add("recipe_defaults", BoM.saveAdded());
@@ -42,14 +40,8 @@ public class EmiPersistentData {
 			if (JsonHelper.hasArray(json, "favorites")) {
 				EmiFavorites.load(JsonHelper.getArray(json, "favorites"));
 			}
-			if (JsonHelper.hasJsonObject(json, "bookmark_counts")) {
-				EmiBookmarks.loadCounts(JsonHelper.getObject(json, "bookmark_counts"));
-			}
-			if (JsonHelper.hasJsonObject(json, "bookmark_pages")) {
-				EmiBookmarks.loadPages(JsonHelper.getObject(json, "bookmark_pages"));
-			}
-			if (JsonHelper.hasJsonObject(json, "bookmark_order")) {
-				EmiBookmarks.loadOrder(JsonHelper.getObject(json, "bookmark_order"));
+			if (JsonHelper.hasArray(json, "bookmark_pages")) {
+				EmiBookmarks.loadPagesData(JsonHelper.getArray(json, "bookmark_pages"));
 			}
 			if (JsonHelper.hasNumber(json, "bookmark_page")) {
 				EmiBookmarks.loadCurrentPage(JsonHelper.getInt(json, "bookmark_page"));

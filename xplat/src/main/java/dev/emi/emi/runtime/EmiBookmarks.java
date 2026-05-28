@@ -103,12 +103,13 @@ public class EmiBookmarks {
 						long batches = Math.max(1, BATCHES.getOrDefault(recipe.getId(), 1L));
 						EmiIngredient output = firstOutput(recipe);
 						if (!output.isEmpty()) {
-							list.add(new BookmarkSlot(scaleAmount(output, batches), recipe, -1));
-							List<EmiIngredient> inputs = recipe.getInputs();
+							list.add(BookmarkSlot.output(scaleAmount(output, batches), recipe));
+							List<CollapsedInput> inputs = collapseInputs(recipe, batches);
 							int limit = Math.max(0, width - 1);
 							int col = 1;
 							for (int i = 0; i < inputs.size() && i < limit; i++) {
-								list.add(new BookmarkSlot(scaleAmount(inputs.get(i), batches), recipe, i));
+								CollapsedInput input = inputs.get(i);
+								list.add(BookmarkSlot.input(input.ingredient, recipe, input.sourceIndices));
 								col++;
 							}
 							while (col < width) {
@@ -136,6 +137,42 @@ public class EmiBookmarks {
 			row++;
 		}
 		return index;
+	}
+
+	private static List<CollapsedInput> collapseInputs(EmiRecipe recipe, long batches) {
+		List<CollapsedInput> collapsed = Lists.newArrayList();
+		List<EmiIngredient> inputs = recipe.getInputs();
+		for (int i = 0; i < inputs.size(); i++) {
+			EmiIngredient scaled = scaleAmount(inputs.get(i), batches);
+			if (scaled.isEmpty()) {
+				continue;
+			}
+			CollapsedInput found = null;
+			for (CollapsedInput entry : collapsed) {
+				if (sameDisplayIngredient(entry.ingredient, scaled)) {
+					found = entry;
+					break;
+				}
+			}
+			if (found == null) {
+				collapsed.add(new CollapsedInput(scaled, i));
+			} else {
+				found.ingredient.setAmount(Math.min(Integer.MAX_VALUE, found.ingredient.getAmount() + scaled.getAmount()));
+				found.addSourceIndex(i);
+			}
+		}
+		return collapsed;
+	}
+
+	private static boolean sameDisplayIngredient(EmiIngredient a, EmiIngredient b) {
+		if (a == null || b == null || a.isEmpty() || b.isEmpty()) {
+			return false;
+		}
+		EmiIngredient ac = a.copy();
+		EmiIngredient bc = b.copy();
+		ac.setAmount(1);
+		bc.setAmount(1);
+		return EmiIngredient.areEqual(ac, bc);
 	}
 
 	private static EmiIngredient firstOutput(EmiRecipe recipe) {
@@ -299,19 +336,46 @@ public class EmiBookmarks {
 	}
 
 	public static class BookmarkSlot extends EmiFavorite {
-		private final int inputIndex;
+		private final boolean output;
+		private final int[] inputIndices;
 
-		public BookmarkSlot(EmiIngredient stack, EmiRecipe recipe, int inputIndex) {
+		private BookmarkSlot(EmiIngredient stack, EmiRecipe recipe, boolean output, int[] inputIndices) {
 			super(stack, recipe);
-			this.inputIndex = inputIndex;
+			this.output = output;
+			this.inputIndices = inputIndices;
+		}
+
+		public static BookmarkSlot output(EmiIngredient stack, EmiRecipe recipe) {
+			return new BookmarkSlot(stack, recipe, true, new int[0]);
+		}
+
+		public static BookmarkSlot input(EmiIngredient stack, EmiRecipe recipe, int[] inputIndices) {
+			return new BookmarkSlot(stack, recipe, false, inputIndices);
 		}
 
 		public boolean isOutput() {
-			return inputIndex < 0;
+			return output;
 		}
 
-		public int getInputIndex() {
-			return inputIndex;
+		public int[] getInputIndices() {
+			return inputIndices;
+		}
+	}
+
+	private static class CollapsedInput {
+		private EmiIngredient ingredient;
+		private int[] sourceIndices;
+
+		private CollapsedInput(EmiIngredient ingredient, int sourceIndex) {
+			this.ingredient = ingredient;
+			this.sourceIndices = new int[] {sourceIndex};
+		}
+
+		private void addSourceIndex(int sourceIndex) {
+			int[] old = sourceIndices;
+			sourceIndices = new int[old.length + 1];
+			System.arraycopy(old, 0, sourceIndices, 0, old.length);
+			sourceIndices[old.length] = sourceIndex;
 		}
 	}
 }

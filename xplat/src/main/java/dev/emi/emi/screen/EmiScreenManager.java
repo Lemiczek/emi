@@ -1829,8 +1829,14 @@ public class EmiScreenManager {
 								EmiRecipe recipe = slot.getRecipe();
 								if (recipe != null && lastPlayerInventory != null) {
 									List<Boolean> availability = availabilityCache.computeIfAbsent(recipe, lastPlayerInventory::getCraftAvailability);
-									int inputIndex = slot.getInputIndex();
-									if (inputIndex >= 0 && inputIndex < availability.size() && availability.get(inputIndex)) {
+									boolean available = true;
+									for (int inputIndex : slot.getInputIndices()) {
+										if (inputIndex < 0 || inputIndex >= availability.size() || !availability.get(inputIndex)) {
+											available = false;
+											break;
+										}
+									}
+									if (available) {
 										color = EmiConfig.bookmarkIngredientAvailableHighlightColor;
 									}
 								}

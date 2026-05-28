@@ -56,6 +56,7 @@ import dev.emi.emi.registry.EmiStackProviders;
 import dev.emi.emi.runtime.EmiDrawContext;
 import dev.emi.emi.runtime.EmiFavorite;
 import dev.emi.emi.runtime.EmiFavorites;
+import dev.emi.emi.runtime.EmiBookmarks;
 import dev.emi.emi.runtime.EmiHidden;
 import dev.emi.emi.runtime.EmiHistory;
 import dev.emi.emi.runtime.EmiLog;
@@ -968,6 +969,14 @@ public class EmiScreenManager {
 					return false;
 				}
 			}
+			ScreenSpace space = panel.getHoveredSpace(mx, my);
+			if (space != null && space.getType() == SidebarType.BOOKMARKS && EmiInput.isControlDown()) {
+				EmiStackInteraction hovered = getHoveredStack(mx, my, true);
+				if (hovered.getRecipeContext() != null && EmiBookmarks.adjustBatch(hovered.getRecipeContext(), -sa, EmiInput.isAltDown())) {
+					repopulatePanels(SidebarType.BOOKMARKS);
+					return true;
+				}
+			}
 			panel.scroll(-sa);
 			return true;
 		}
@@ -1200,6 +1209,14 @@ public class EmiScreenManager {
 		EmiIngredient ingredient = stack.getStack();
 		EmiRecipe context = EmiApi.getRecipeContext(ingredient);
 		if (!ingredient.isEmpty()) {
+			if (stack instanceof SidebarEmiStackInteraction sesi && sesi.getType() == SidebarType.BOOKMARKS
+					&& function.apply(EmiConfig.favorite) && stack.getRecipeContext() != null) {
+				if (EmiBookmarks.removeRecipe(stack.getRecipeContext())) {
+					repopulatePanels(SidebarType.BOOKMARKS);
+					repopulatePanels(SidebarType.FAVORITES);
+					return true;
+				}
+			}
 			if (EmiConfig.editMode) {
 				if (stack instanceof SidebarEmiStackInteraction sesi && sesi.getType() == SidebarType.INDEX) {
 					if (function.apply(EmiConfig.hideStack)) {
@@ -1241,6 +1258,7 @@ public class EmiScreenManager {
 			} else if (function.apply(EmiConfig.favorite)) {
 				EmiFavorites.addFavorite(ingredient, stack.getRecipeContext());
 				repopulatePanels(SidebarType.FAVORITES);
+				repopulatePanels(SidebarType.BOOKMARKS);
 				return true;
 			} else if (function.apply(EmiConfig.viewStackTree) && stack.getRecipeContext() != null) {
 				BoM.setGoal(stack.getRecipeContext());
@@ -1324,6 +1342,7 @@ public class EmiScreenManager {
 		if (function.apply(EmiConfig.favorite) && recipe.getOutputs().size() > 0) {
 			EmiFavorites.addFavorite(recipe.getOutputs().get(0), recipe);
 			repopulatePanels(SidebarType.FAVORITES);
+			repopulatePanels(SidebarType.BOOKMARKS);
 			return true;
 		} else if (function.apply(EmiConfig.copyId)) {
 			MinecraftClient.getInstance().getSoundManager().play(PositionedSoundInstance.master(SoundEvents.UI_BUTTON_CLICK, 1.0f));
@@ -1735,6 +1754,8 @@ public class EmiScreenManager {
 		public List<? extends EmiIngredient> getStacks() {
 			if (search && getType() != SidebarType.CHESS) {
 				return searchedStacks;
+			} else if (getType() == SidebarType.BOOKMARKS) {
+				return EmiBookmarks.getSidebar(this);
 			} else {
 				return EmiSidebars.getStacks(getType());
 			}

@@ -52,6 +52,8 @@
   "emi.sidebar.type.craftables.description": "Displays all craftable stacks",
   "emi.sidebar.type.favorites": "Favorites",
   "emi.sidebar.type.favorites.description": "Displays favorites",
+  "emi.sidebar.type.bookmarks": "Bookmarks",
+  "emi.sidebar.type.bookmarks.description": "Displays bookmarked recipes as output + inputs rows",
   "emi.sidebar.type.lookup_history": "Lookup History",
   "emi.sidebar.type.lookup_history.description": "Displays previously looked up stacks",
   "emi.sidebar.type.craft_history": "Crafting History",

@@ -18,6 +18,7 @@ public class EmiPersistentData {
 		try {
 			JsonObject json = new JsonObject();
 			json.add("favorites", EmiFavorites.save());
+			json.add("bookmark_counts", EmiBookmarks.save());
 			EmiSidebars.save(json);
 			json.add("recipe_defaults", BoM.saveAdded());
 			json.add("hidden_stacks", EmiHidden.save());
@@ -37,6 +38,9 @@ public class EmiPersistentData {
 			JsonObject json = GSON.fromJson(new FileReader(FILE), JsonObject.class);
 			if (JsonHelper.hasArray(json, "favorites")) {
 				EmiFavorites.load(JsonHelper.getArray(json, "favorites"));
+			}
+			if (JsonHelper.hasJsonObject(json, "bookmark_counts")) {
+				EmiBookmarks.load(JsonHelper.getObject(json, "bookmark_counts"));
 			}
 			EmiSidebars.load(json);
 			if (JsonHelper.hasJsonObject(json, "recipe_defaults")) {

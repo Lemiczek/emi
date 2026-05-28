@@ -9,6 +9,7 @@ public enum SidebarType implements ConfigEnum {
 	INDEX("index", 0, 146),
 	CRAFTABLES("craftables", 16, 146),
 	FAVORITES("favorites", 32, 146),
+	BOOKMARKS("bookmarks", 112, 146),
 	LOOKUP_HISTORY("lookup-history", 80, 146),
 	CRAFT_HISTORY("craft-history", 64, 146),
 	EMPTY("empty", 96, 146),

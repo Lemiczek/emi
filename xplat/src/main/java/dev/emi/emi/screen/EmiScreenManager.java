@@ -719,11 +719,12 @@ public class EmiScreenManager {
 			SidebarPanel panel = getHoveredPanel(mouseX, mouseY);
 			if (panel != null) {
 				ScreenSpace space = panel.getHoveredSpace(mouseX, mouseY);
-				if (space != null && space.getType() == SidebarType.FAVORITES) {
+				if (space != null && (space.getType() == SidebarType.FAVORITES || space.getType() == SidebarType.BOOKMARKS)) {
 					int pageSize = space.pageSize;
 					int page = panel.page;
-					int index = space.getClosestEdge(mouseX, mouseY);
-					if (index + pageSize * page > EmiFavorites.favorites.size()) {
+					int size = space.getStacks().size();
+					int index = Math.min(space.getClosestEdge(mouseX, mouseY), size);
+					if (space.getType() == SidebarType.FAVORITES && index + pageSize * page > EmiFavorites.favorites.size()) {
 						index = EmiFavorites.favorites.size() - pageSize * page;
 					}
 					if (index + pageSize * page > space.getStacks().size()) {
@@ -1075,6 +1076,22 @@ public class EmiScreenManager {
 								space.batcher.repopulate();
 							}
 							return true;
+						} else if (space != null && space.getType() == SidebarType.BOOKMARKS && pressedStack instanceof EmiBookmarks.BookmarkSlot) {
+							EmiRecipe draggedRecipe = EmiApi.getRecipeContext(draggedStack);
+							if (draggedRecipe != null) {
+								EmiStackInteraction hovered = getHoveredStack(mx, my, true);
+								EmiRecipe target = hovered.getRecipeContext();
+								boolean after = false;
+								int off = space.getRawOffsetFromMouse(mx, my);
+								if (off >= 0) {
+									int ry = space.getRawY(off);
+									after = my >= ry + ENTRY_SIZE / 2;
+								}
+								if (EmiBookmarks.reorderRecipe(draggedRecipe, target, after, EmiBookmarks.getCurrentPage())) {
+									repopulatePanels(SidebarType.BOOKMARKS);
+									return true;
+								}
+							}
 						} else if (panel.getType() == SidebarType.CHESS) {
 							EmiChess.drop(draggedStack, getHoveredStack(mx, my, true).getStack());
 						}

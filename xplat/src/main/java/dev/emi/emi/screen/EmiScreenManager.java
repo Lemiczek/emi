@@ -7,6 +7,9 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import java.util.HashMap;
+import java.util.Map;
+
 import org.jetbrains.annotations.Nullable;
 import org.lwjgl.glfw.GLFW;
 
@@ -567,6 +570,9 @@ public class EmiScreenManager {
 					}
 					if (n >= 0 && n < space.getStacks().size()) {
 						EmiIngredient hovered = space.getStacks().get(n);
+						if (hovered.isEmpty()) {
+							return EmiStackInteraction.EMPTY;
+						}
 						if (hovered instanceof EmiFavorite fav) {
 							return new SidebarEmiStackInteraction(hovered, space, fav.getRecipe(), true);
 						}
@@ -970,12 +976,14 @@ public class EmiScreenManager {
 				}
 			}
 			ScreenSpace space = panel.getHoveredSpace(mx, my);
-			if (space != null && space.getType() == SidebarType.BOOKMARKS && EmiInput.isControlDown()) {
+			if (space != null && space.getType() == SidebarType.BOOKMARKS) {
 				EmiStackInteraction hovered = getHoveredStack(mx, my, true);
-				if (hovered.getRecipeContext() != null && EmiBookmarks.adjustBatch(hovered.getRecipeContext(), -sa, EmiInput.isAltDown())) {
+				if ((EmiInput.isControlDown() || EmiInput.isShiftDown()) && hovered.getRecipeContext() != null
+						&& EmiBookmarks.adjustBatch(hovered.getRecipeContext(), sa, EmiInput.isAltDown())) {
 					repopulatePanels(SidebarType.BOOKMARKS);
-					return true;
 				}
+				// Bookmarks pages are explicit via header controls; wheel never flips pages here.
+				return true;
 			}
 			panel.scroll(-sa);
 			return true;
@@ -1256,7 +1264,9 @@ public class EmiScreenManager {
 				EmiApi.displayUses(ingredient);
 				return true;
 			} else if (function.apply(EmiConfig.favorite)) {
-				EmiFavorites.addFavorite(ingredient, stack.getRecipeContext());
+				EmiRecipe recipe = stack.getRecipeContext();
+				EmiFavorites.addFavorite(ingredient, recipe);
+				EmiBookmarks.onRecipeBookmarked(recipe);
 				repopulatePanels(SidebarType.FAVORITES);
 				repopulatePanels(SidebarType.BOOKMARKS);
 				return true;
@@ -1341,6 +1351,7 @@ public class EmiScreenManager {
 		}
 		if (function.apply(EmiConfig.favorite) && recipe.getOutputs().size() > 0) {
 			EmiFavorites.addFavorite(recipe.getOutputs().get(0), recipe);
+			EmiBookmarks.onRecipeBookmarked(recipe);
 			repopulatePanels(SidebarType.FAVORITES);
 			repopulatePanels(SidebarType.BOOKMARKS);
 			return true;
@@ -1524,8 +1535,14 @@ public class EmiScreenManager {
 					cycle.render(context.raw(), mouseX, mouseY, delta);
 					pageRight.render(context.raw(), mouseX, mouseY, delta);
 					context.pop();
+					if (getType() == SidebarType.BOOKMARKS) {
+						page = EmiBookmarks.getCurrentPage();
+					}
 					int totalPages = (space.getStacks().size() - 1) / space.pageSize + 1;
 					wrapPage();
+					if (getType() == SidebarType.BOOKMARKS) {
+						EmiBookmarks.setCurrentPage(page);
+					}
 					drawHeader(context, mouseX, mouseY, delta, page, totalPages);
 					for (ScreenSpace space : getSpaces()) {
 						if (space == this.space) {
@@ -1692,6 +1709,9 @@ public class EmiScreenManager {
 			} else if (page < 0) {
 				page = totalPages - 1;
 			}
+			if (getType() == SidebarType.BOOKMARKS) {
+				EmiBookmarks.setCurrentPage(page);
+			}
 			space.batcher.repopulate();
 		}
 
@@ -1784,8 +1804,10 @@ public class EmiScreenManager {
 				batcher.begin(0, 0, 0);
 				int i = startIndex;
 				List<? extends EmiIngredient> stacks = getStacks();
+				Map<EmiRecipe, List<Boolean>> availabilityCache = new HashMap<>();
 				int hovered = this.getRawOffsetFromMouse(mouseX, mouseY);
-				if (hovered != -1 && EmiConfig.showHoverOverlay && startIndex + hovered < stacks.size()) {
+				if (hovered != -1 && EmiConfig.showHoverOverlay && startIndex + hovered < stacks.size()
+						&& !stacks.get(startIndex + hovered).isEmpty()) {
 					hx = this.getRawX(hovered);
 					hy = this.getRawY(hovered);
 					EmiRenderHelper.drawSlotHightlight(context, hx, hy, ENTRY_SIZE, ENTRY_SIZE, 0);
@@ -1799,7 +1821,25 @@ public class EmiScreenManager {
 						int cx = this.getX(xo, yo);
 						int cy = this.getY(xo, yo);
 						EmiIngredient stack = stacks.get(i++);
-						batcher.render(stack, context.raw(), cx + 1, cy + 1, delta);
+						if (getType() == SidebarType.BOOKMARKS && stack instanceof EmiBookmarks.BookmarkSlot slot) {
+							if (slot.isOutput()) {
+								context.fill(cx, cy, ENTRY_SIZE, ENTRY_SIZE, EmiConfig.bookmarkOutputHighlightColor);
+							} else {
+								int color = EmiConfig.bookmarkIngredientMissingHighlightColor;
+								EmiRecipe recipe = slot.getRecipe();
+								if (recipe != null && lastPlayerInventory != null) {
+									List<Boolean> availability = availabilityCache.computeIfAbsent(recipe, lastPlayerInventory::getCraftAvailability);
+									int inputIndex = slot.getInputIndex();
+									if (inputIndex >= 0 && inputIndex < availability.size() && availability.get(inputIndex)) {
+										color = EmiConfig.bookmarkIngredientAvailableHighlightColor;
+									}
+								}
+								context.fill(cx, cy, ENTRY_SIZE, ENTRY_SIZE, color);
+							}
+						}
+						if (!stack.isEmpty()) {
+							batcher.render(stack, context.raw(), cx + 1, cy + 1, delta);
+						}
 						if (getType() == SidebarType.INDEX) {
 							if (EmiConfig.editMode && EmiHidden.isHidden(stack)) {
 								context.enableDepthTest();

@@ -507,6 +507,18 @@ public class EmiConfig {
 	@ConfigValue("dev.highlight-exclusion-areas")
 	public static boolean highlightExclusionAreas = false;
 
+	@Comment("Background highlight color for bookmarked recipe outputs (ARGB)")
+	@ConfigValue("dev.bookmark-output-highlight-color")
+	public static int bookmarkOutputHighlightColor = 0x5533BB66;
+
+	@Comment("Background highlight color for bookmarked ingredients that are available in inventory (ARGB)")
+	@ConfigValue("dev.bookmark-ingredient-available-highlight-color")
+	public static int bookmarkIngredientAvailableHighlightColor = 0x4400918e;
+
+	@Comment("Background highlight color for bookmarked ingredients that are missing from inventory (ARGB)")
+	@ConfigValue("dev.bookmark-ingredient-missing-highlight-color")
+	public static int bookmarkIngredientMissingHighlightColor = 0x44911300;
+
 	// Persistent (currently empty)
 
 	public static void loadConfig() {

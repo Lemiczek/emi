@@ -20,7 +20,9 @@ import net.minecraft.util.Identifier;
 public class EmiBookmarks {
 	private static final List<EmiIngredient> FALLBACK = List.of();
 	private static final Map<Identifier, Long> BATCHES = Maps.newHashMap();
+	private static final Map<Identifier, Integer> PAGES = Maps.newHashMap();
 	private static final Map<String, List<EmiIngredient>> LAYOUT_CACHE = Maps.newHashMap();
+	private static int currentPage = 0;
 	private static int version = 0;
 
 	private static void bump() {
@@ -50,64 +52,90 @@ public class EmiBookmarks {
 	}
 
 	private static List<EmiIngredient> buildLayout(EmiScreenManager.ScreenSpace space) {
+		pruneInvalidFavorites();
 		List<EmiIngredient> list = Lists.newArrayList();
-		List<EmiFavorite> bookmarkRecipes = Lists.newArrayList();
+		Map<Integer, List<EmiFavorite>> pagedRecipes = Maps.newHashMap();
+		int maxAssignedPage = -1;
 		for (EmiFavorite fav : EmiFavorites.favorites) {
 			if (fav.getRecipe() != null && fav.getRecipe().getId() != null) {
-				bookmarkRecipes.add(fav);
+				int page = Math.max(0, PAGES.getOrDefault(fav.getRecipe().getId(), 0));
+				pagedRecipes.computeIfAbsent(page, k -> Lists.newArrayList()).add(fav);
+				maxAssignedPage = Math.max(maxAssignedPage, page);
 			}
 		}
-		if (bookmarkRecipes.isEmpty()) {
+		if (maxAssignedPage < 0) {
 			return list;
 		}
 
-		int row = 0;
-		int col = 0;
-		for (EmiFavorite fav : bookmarkRecipes) {
-			EmiRecipe recipe = fav.getRecipe();
-			if (recipe == null || recipe.getId() == null) {
-				continue;
-			}
-			int width = widthForRow(space, row);
-			if (width <= 0) {
-				break;
-			}
-			if (col != 0) {
-				while (col < width) {
-					list.add(EmiStack.EMPTY);
-					col++;
+		int totalPages = maxAssignedPage + 2;
+		int page = 0;
+		while (page < totalPages) {
+			List<EmiFavorite> recipes = pagedRecipes.getOrDefault(page, List.of());
+			int consumed = appendPage(space, list, recipes);
+			if (consumed < recipes.size()) {
+				int nextPage = page + 1;
+				List<EmiFavorite> overflow = recipes.subList(consumed, recipes.size());
+				List<EmiFavorite> next = pagedRecipes.computeIfAbsent(nextPage, k -> Lists.newArrayList());
+				next.addAll(0, overflow);
+				for (EmiFavorite fav : overflow) {
+					EmiRecipe recipe = fav.getRecipe();
+					if (recipe != null && recipe.getId() != null) {
+						PAGES.put(recipe.getId(), nextPage);
+					}
 				}
-				col = 0;
-				row++;
-				width = widthForRow(space, row);
-				if (width <= 0) {
-					break;
-				}
+				totalPages = Math.max(totalPages, nextPage + 2);
 			}
-
-			long batches = Math.max(1, BATCHES.getOrDefault(recipe.getId(), 1L));
-			EmiIngredient output = firstOutput(recipe);
-			if (output.isEmpty()) {
-				continue;
-			}
-			list.add(new EmiFavorite(scaleAmount(output, batches), recipe));
-			col++;
-
-			List<EmiIngredient> inputs = recipe.getInputs();
-			int limit = Math.max(0, width - 1);
-			for (int i = 0; i < inputs.size() && i < limit; i++) {
-				list.add(new EmiFavorite(scaleAmount(inputs.get(i), batches), recipe));
-				col++;
-			}
-
-			while (col < width) {
-				list.add(EmiStack.EMPTY);
-				col++;
-			}
-			col = 0;
-			row++;
+			page++;
 		}
 		return list;
+	}
+
+	private static int appendPage(EmiScreenManager.ScreenSpace space, List<EmiIngredient> list, List<EmiFavorite> recipes) {
+		int row = 0;
+		int index = 0;
+		while (row < space.th) {
+			int width = widthForRow(space, row);
+			if (width > 0) {
+				if (index < recipes.size()) {
+					EmiFavorite fav = recipes.get(index);
+					EmiRecipe recipe = fav.getRecipe();
+					if (recipe != null && recipe.getId() != null) {
+						long batches = Math.max(1, BATCHES.getOrDefault(recipe.getId(), 1L));
+						EmiIngredient output = firstOutput(recipe);
+						if (!output.isEmpty()) {
+							list.add(new BookmarkSlot(scaleAmount(output, batches), recipe, -1));
+							List<EmiIngredient> inputs = recipe.getInputs();
+							int limit = Math.max(0, width - 1);
+							int col = 1;
+							for (int i = 0; i < inputs.size() && i < limit; i++) {
+								list.add(new BookmarkSlot(scaleAmount(inputs.get(i), batches), recipe, i));
+								col++;
+							}
+							while (col < width) {
+								list.add(EmiStack.EMPTY);
+								col++;
+							}
+							index++;
+						} else {
+							for (int col = 0; col < width; col++) {
+								list.add(EmiStack.EMPTY);
+							}
+						}
+					} else {
+						for (int col = 0; col < width; col++) {
+							list.add(EmiStack.EMPTY);
+						}
+						index++;
+					}
+				} else {
+					for (int col = 0; col < width; col++) {
+						list.add(EmiStack.EMPTY);
+					}
+				}
+			}
+			row++;
+		}
+		return index;
 	}
 
 	private static EmiIngredient firstOutput(EmiRecipe recipe) {
@@ -171,13 +199,43 @@ public class EmiBookmarks {
 		boolean removed = EmiFavorites.favorites.removeIf(f -> f.getRecipe() != null && id.equals(f.getRecipe().getId()));
 		if (removed) {
 			BATCHES.remove(id);
+			PAGES.remove(id);
 			bump();
 			EmiPersistentData.save();
 		}
 		return removed;
 	}
 
-	public static JsonObject save() {
+	public static int getCurrentPage() {
+		return currentPage;
+	}
+
+	public static void setCurrentPage(int page) {
+		page = Math.max(0, page);
+		if (currentPage != page) {
+			currentPage = page;
+			EmiPersistentData.save();
+		}
+	}
+
+	public static void loadCurrentPage(int page) {
+		currentPage = Math.max(0, page);
+	}
+
+	public static void onRecipeBookmarked(EmiRecipe recipe) {
+		if (recipe == null || recipe.getId() == null) {
+			return;
+		}
+		Identifier id = recipe.getId();
+		if (!PAGES.containsKey(id)) {
+			PAGES.put(id, currentPage);
+			bump();
+			EmiPersistentData.save();
+		}
+	}
+
+	public static JsonObject saveCounts() {
+		pruneInvalidFavorites();
 		JsonObject json = new JsonObject();
 		for (Map.Entry<Identifier, Long> entry : BATCHES.entrySet()) {
 			json.addProperty(entry.getKey().toString(), entry.getValue());
@@ -185,7 +243,7 @@ public class EmiBookmarks {
 		return json;
 	}
 
-	public static void load(JsonObject json) {
+	public static void loadCounts(JsonObject json) {
 		BATCHES.clear();
 		Set<Identifier> validIds = Sets.newHashSet();
 		for (EmiFavorite fav : EmiFavorites.favorites) {
@@ -201,5 +259,59 @@ public class EmiBookmarks {
 			}
 		}
 		bump();
+	}
+
+	public static JsonObject savePages() {
+		pruneInvalidFavorites();
+		JsonObject json = new JsonObject();
+		for (Map.Entry<Identifier, Integer> entry : PAGES.entrySet()) {
+			json.addProperty(entry.getKey().toString(), Math.max(0, entry.getValue()));
+		}
+		return json;
+	}
+
+	public static void loadPages(JsonObject json) {
+		PAGES.clear();
+		Set<Identifier> validIds = Sets.newHashSet();
+		for (EmiFavorite fav : EmiFavorites.favorites) {
+			if (fav.getRecipe() != null && fav.getRecipe().getId() != null) {
+				validIds.add(fav.getRecipe().getId());
+			}
+		}
+		for (Map.Entry<String, JsonElement> entry : json.entrySet()) {
+			Identifier id = Identifier.tryParse(entry.getKey());
+			if (id != null && validIds.contains(id) && entry.getValue().isJsonPrimitive() && entry.getValue().getAsJsonPrimitive().isNumber()) {
+				PAGES.put(id, Math.max(0, entry.getValue().getAsInt()));
+			}
+		}
+		bump();
+	}
+
+	private static void pruneInvalidFavorites() {
+		Set<Identifier> validIds = Sets.newHashSet();
+		for (EmiFavorite fav : EmiFavorites.favorites) {
+			if (fav.getRecipe() != null && fav.getRecipe().getId() != null) {
+				validIds.add(fav.getRecipe().getId());
+			}
+		}
+		BATCHES.keySet().removeIf(id -> !validIds.contains(id));
+		PAGES.keySet().removeIf(id -> !validIds.contains(id));
+	}
+
+	public static class BookmarkSlot extends EmiFavorite {
+		private final int inputIndex;
+
+		public BookmarkSlot(EmiIngredient stack, EmiRecipe recipe, int inputIndex) {
+			super(stack, recipe);
+			this.inputIndex = inputIndex;
+		}
+
+		public boolean isOutput() {
+			return inputIndex < 0;
+		}
+
+		public int getInputIndex() {
+			return inputIndex;
+		}
 	}
 }

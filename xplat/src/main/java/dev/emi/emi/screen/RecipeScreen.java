@@ -38,6 +38,7 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.client.gui.tooltip.TooltipComponent;
+import net.minecraft.client.gui.widget.TextFieldWidget;
 import net.minecraft.client.sound.PositionedSoundInstance;
 import net.minecraft.sound.SoundEvents;
 import net.minecraft.text.Text;
@@ -49,13 +50,19 @@ public class RecipeScreen extends Screen {
 	private Map<EmiRecipeCategory, List<EmiRecipe>> recipes;
 	public HandledScreen<?> old;
 	private List<RecipeTab> tabs = Lists.newArrayList();
+	private List<RecipeTab> allTabs = Lists.newArrayList(); // Unfiltered tabs; tabs is rebuilt from this when filtering
 	private int tabPageSize = 6;
 	private int tabPage = 0, tab = 0, page = 0;
 	private List<SizedButtonWidget> arrows;
+	private SizedButtonWidget searchButton;
 	private List<WidgetGroup> currentPage = Lists.newArrayList();
 	private int buttonOff = 0, tabOff = 0;
 	private Widget hoveredWidget = null, pressedSlot = null;
 	private ResolutionButtonWidget resolutionButton;
+	private TextFieldWidget recipeSearchField;
+	// Static so the search state persists when RecipeScreen is re-created (e.g. clicking a new item)
+	private static String recipeSearchQuery = "";
+	private static boolean recipeSearchVisible = false;
 	private double scrollAcc = 0;
 	private int minimumWidth = 176;
 	int backgroundWidth = minimumWidth;
@@ -75,10 +82,11 @@ public class RecipeScreen extends Screen {
 				() -> tabs.size() > 1, w -> setPage(tabPage, tab - 1, 0)),
 			new SizedButtonWidget(x + backgroundWidth - 17, y + 5, 12, 12, 12, 0,
 				() -> tabs.size() > 1, w -> setPage(tabPage, tab + 1, 0)),
-			new SizedButtonWidget(x + 5, y + 18, 12, 12, 0, 0,
-				() -> tabs.get(tab).getPageCount() > 1, w -> setPage(tabPage, tab, page - 1)),
+			// Guards needed: tabs can be empty when a search filter removes all matching categories
+		new SizedButtonWidget(x + 5, y + 18, 12, 12, 0, 0,
+				() -> hasValidTab() && tabs.get(tab).getPageCount() > 1, w -> setPage(tabPage, tab, page - 1)),
 			new SizedButtonWidget(x + backgroundWidth - 17, y + 18, 12, 12, 12, 0,
-				() -> tabs.get(tab).getPageCount() > 1, w -> setPage(tabPage, tab, page + 1))
+				() -> hasValidTab() && tabs.get(tab).getPageCount() > 1, w -> setPage(tabPage, tab, page + 1))
 		);
 		resolve = null;
 		this.recipes = recipes;
@@ -98,16 +106,32 @@ public class RecipeScreen extends Screen {
 			addDrawableChild(widget);
 		}
 		EmiScreenManager.addWidgets(this);
+		searchButton = new SizedButtonWidget(x + minimumWidth - 35 + buttonOff, y + 17, 16, 16, 0, 146, () -> true, w -> toggleRecipeSearch()) {
+			{ texture = EmiRenderHelper.WIDGETS; }
+		};
+		addDrawableChild(searchButton);
+		recipeSearchField = new TextFieldWidget(client.textRenderer, x + 19 + buttonOff, y + 33, minimumWidth - 38, 12, EmiPort.literal(""));
+		recipeSearchField.setMaxLength(256);
+		recipeSearchField.setDrawsBackground(false);
+		recipeSearchField.setEditableColor(-1);
+		recipeSearchField.setVisible(recipeSearchVisible);
+		recipeSearchField.setText(recipeSearchQuery);
+		recipeSearchField.setChangedListener(query -> {
+			recipeSearchQuery = query;
+			applyRecipeFilter(query);
+		});
+		addDrawableChild(recipeSearchField);
 		if (resolve != null) {
 			resolutionButton = new ResolutionButtonWidget(x - 18, y + 10, 18, 18, resolve, () -> hoveredWidget);
 			this.addDrawableChild(resolutionButton);
 		}
 		if (recipes != null) {
 			EmiRecipe current = null;
-			if (tab < tabs.size() && page < tabs.get(tab).getPageCount() && tabs.get(tab).getPage(page).size() > 0) {
+			if (hasValidTab() && page < tabs.get(tab).getPageCount() && tabs.get(tab).getPage(page).size() > 0) {
 				current = tabs.get(tab).getPage(page).get(0).recipe;
 			}
 			tabs.clear();
+			allTabs.clear();
 			if (!recipes.isEmpty()) {
 				for (Map.Entry<EmiRecipeCategory, List<EmiRecipe>> entry : recipes.entrySet().stream()
 						.sorted((a, b) -> {
@@ -124,9 +148,14 @@ public class RecipeScreen extends Screen {
 					List<EmiRecipe> set = entry.getValue();
 					if (!set.isEmpty()) {
 						RecipeTab tab = new RecipeTab(entry.getKey(), set);
-						tab.bakePages(backgroundHeight);
-						tabs.add(tab);
+						tab.setFilter(recipeSearchQuery);
+						tab.bakePages(backgroundHeight - (recipeSearchVisible ? 14 : 0));
+						allTabs.add(tab);
 					}
+				}
+				tabs.addAll(allTabs);
+				if (!recipeSearchQuery.isEmpty()) {
+					tabs.removeIf(t -> !t.hasFilteredResults());
 				}
 				
 				tab = -1;
@@ -162,6 +191,9 @@ public class RecipeScreen extends Screen {
 		this.arrows.get(3).y = this.y + 5;
 		this.arrows.get(4).y = this.y + 19;
 		this.arrows.get(5).y = this.y + 19;
+
+		this.searchButton.x = this.x + minimumWidth - 35 + buttonOff;
+		this.searchButton.y = this.y + 17;
 	}
 
 	@SuppressWarnings({"rawtypes", "unchecked"})
@@ -187,33 +219,50 @@ public class RecipeScreen extends Screen {
 		EmiRenderHelper.drawNinePatch(context, TEXTURE, x + 19 + buttonOff, y + 19, minimumWidth - 38, 12, 0, 16, 3, 6);
 		//EmiRenderHelper.drawScroll(context, x + 19 + buttonOff, y + 19 + 10, minimumWidth - 38, 2, page, tabs.get(tab).getPageCount(), -1);
 		
-		boolean categoryHovered = mouseX >= x + 19 + buttonOff && mouseY >= y + 5 && mouseX < x + minimumWidth + buttonOff - 19 && mouseY < y + 5 + 12;
-		int categoryNameColor = categoryHovered ? 0x22ffff : 0xffffff;
+		// Null-safe: tabs can be empty when search filter removes all categories
+		boolean categoryHovered = false;
+		RecipeTab currentTab = hasValidTab() ? tabs.get(this.tab) : null;
+		if (currentTab != null) {
+			categoryHovered = mouseX >= x + 19 + buttonOff && mouseY >= y + 5 && mouseX < x + minimumWidth + buttonOff - 19 && mouseY < y + 5 + 12;
+			int categoryNameColor = categoryHovered ? 0x22ffff : 0xffffff;
 
-		RecipeTab tab = tabs.get(this.tab);
-		Text text = tab.category.getName();
-		if (client.textRenderer.getWidth(text) > minimumWidth - 40) {
-			int extraWidth = client.textRenderer.getWidth("...");
-			text = EmiPort.literal(client.textRenderer.trimToWidth(text, (minimumWidth - 40) - extraWidth).getString() + "...");
-		}
-		context.drawCenteredTextWithShadow(text, x + backgroundWidth / 2, y + 7, categoryNameColor);
-		context.drawCenteredTextWithShadow(EmiRenderHelper.getPageText(this.page + 1, tab.getPageCount(), minimumWidth - 40),
-			x + backgroundWidth / 2, y + 21, 0xffffff);
-
-		List<EmiIngredient> workstations = EmiApi.getRecipeManager().getWorkstations(tab.category);
-		int workstationAmount = Math.min(workstations.size(), getMaxWorkstations());
-		if (workstationAmount > 0 || resolve != null) {
-			Bounds bounds = getWorkstationBounds(-1);
-			int offset = getResolveOffset();
-			if (workstationAmount <= 0) {
-				offset = 18;
+			Text text = currentTab.category.getName();
+			if (client.textRenderer.getWidth(text) > minimumWidth - 40) {
+				int extraWidth = client.textRenderer.getWidth("...");
+				text = EmiPort.literal(client.textRenderer.trimToWidth(text, (minimumWidth - 40) - extraWidth).getString() + "...");
 			}
-			if (EmiConfig.workstationLocation == SidebarSide.LEFT) {
-				EmiRenderHelper.drawNinePatch(context, TEXTURE, bounds.x() - 5, bounds.y() - 5, 28, 10 + 18 * workstationAmount + offset, 36, 0, 5, 1);
-			} else if (EmiConfig.workstationLocation == SidebarSide.RIGHT) {
-				EmiRenderHelper.drawNinePatch(context, TEXTURE, bounds.x() - 5, bounds.y() - 5, 28, 10 + 18 * workstationAmount + offset, 47, 0, 5, 1);
-			} else if (EmiConfig.workstationLocation == SidebarSide.BOTTOM) {
-				EmiRenderHelper.drawNinePatch(context, TEXTURE, bounds.x() - 5, bounds.y() - 5, 10 + 18 * workstationAmount + offset, 28, 58, 0, 5, 1);
+			context.drawCenteredTextWithShadow(text, x + backgroundWidth / 2, y + 7, categoryNameColor);
+			context.drawCenteredTextWithShadow(EmiRenderHelper.getPageText(this.page + 1, currentTab.getPageCount(), minimumWidth - 40),
+				x + backgroundWidth / 2, y + 21, 0xffffff);
+		}
+
+		if (recipeSearchVisible) {
+			EmiRenderHelper.drawNinePatch(context, TEXTURE, x + 19 + buttonOff, y + 33, minimumWidth - 38, 12, 0, 16, 3, 6);
+			recipeSearchField.setX(x + 21 + buttonOff);
+			recipeSearchField.setY(y + 35);
+			recipeSearchField.setWidth(minimumWidth - 42);
+			if (recipeSearchQuery.isEmpty() && !recipeSearchField.isFocused()) {
+				context.drawTextWithShadow(EmiPort.translatable("emi.recipe_search"),
+					x + 22 + buttonOff, y + 35, 0x888888);
+			}
+		}
+
+		if (currentTab != null) {
+			List<EmiIngredient> workstations = EmiApi.getRecipeManager().getWorkstations(currentTab.category);
+			int workstationAmount = Math.min(workstations.size(), getMaxWorkstations());
+			if (workstationAmount > 0 || resolve != null) {
+				Bounds bounds = getWorkstationBounds(-1);
+				int offset = getResolveOffset();
+				if (workstationAmount <= 0) {
+					offset = 18;
+				}
+				if (EmiConfig.workstationLocation == SidebarSide.LEFT) {
+					EmiRenderHelper.drawNinePatch(context, TEXTURE, bounds.x() - 5, bounds.y() - 5, 28, 10 + 18 * workstationAmount + offset, 36, 0, 5, 1);
+				} else if (EmiConfig.workstationLocation == SidebarSide.RIGHT) {
+					EmiRenderHelper.drawNinePatch(context, TEXTURE, bounds.x() - 5, bounds.y() - 5, 28, 10 + 18 * workstationAmount + offset, 47, 0, 5, 1);
+				} else if (EmiConfig.workstationLocation == SidebarSide.BOTTOM) {
+					EmiRenderHelper.drawNinePatch(context, TEXTURE, bounds.x() - 5, bounds.y() - 5, 10 + 18 * workstationAmount + offset, 28, 58, 0, 5, 1);
+				}
 			}
 		}
 		for (WidgetGroup group : currentPage) {
@@ -247,13 +296,18 @@ public class RecipeScreen extends Screen {
 			context.pop();
 			EmiPort.applyModelViewMatrix();
 		}
+		if (currentPage.isEmpty() && !recipeSearchQuery.isEmpty()) {
+			Text noResults = EmiPort.translatable("emi.recipe_screen.no_results");
+			int textWidth = client.textRenderer.getWidth(noResults);
+			context.raw().drawTextWithShadow(client.textRenderer, noResults, x + (backgroundWidth - textWidth) / 2, y + getRecipeAreaTop() + 10, 0xAAAAAA);
+		}
 		EmiScreenManager.drawBackground(context, mouseX, mouseY, delta);
 		EmiScreenManager.render(context, mouseX, mouseY, delta);
 		EmiScreenManager.drawForeground(context, mouseX, mouseY, delta);
 		super.render(context.raw(), mouseX, mouseY, delta);
-		if (categoryHovered) {
+		if (categoryHovered && currentTab != null) {
 			context.raw().drawTooltip(client.textRenderer, List.of(
-				tab.category.getName(),
+				currentTab.category.getName(),
 				EmiPort.translatable("emi.view_all_recipes")
 			), mouseX, mouseY);
 		}
@@ -331,6 +385,10 @@ public class RecipeScreen extends Screen {
 	}
 
 	public EmiRecipeCategory getFocusedCategory() {
+		// Guard: external mixins call this during render: tabs can be empty when a search filter has no matches
+		if (!hasValidTab()) {
+			return null;
+		}
 		return tabs.get(tab).category;
 	}
 
@@ -374,7 +432,7 @@ public class RecipeScreen extends Screen {
 			int width = Math.max(minimumWidth - 16, tab.getWidth());
 			setRecipePageWidth(width + 16);
 			currentPage = Lists.newArrayList();
-			currentPage.addAll(tab.constructWidgets(page, x, y, backgroundWidth, backgroundHeight));
+			currentPage.addAll(tab.constructWidgets(page, x, y, backgroundWidth, backgroundHeight, getRecipeAreaTop()));
 			List<EmiIngredient> workstations = EmiApi.getRecipeManager().getWorkstations(tab.category);
 			if (!workstations.isEmpty()) {
 				WidgetGroup widgets = new WidgetGroup(null, 0, 0, 0, 0);
@@ -412,6 +470,15 @@ public class RecipeScreen extends Screen {
 		int mx = (int) mouseX;
 		int my = (int) mouseY;
 		pressedSlot = null;
+		if (recipeSearchField != null && recipeSearchVisible) {
+			if (recipeSearchField.isMouseOver(mouseX, mouseY)) {
+				recipeSearchField.mouseClicked(mouseX, mouseY, button);
+				recipeSearchField.setFocused(true);
+				return true;
+			} else {
+				recipeSearchField.setFocused(false);
+			}
+		}
 		if (mouseX >= x + 19 + buttonOff && mouseY >= y + 5 && mouseX < x + minimumWidth + buttonOff - 19 && mouseY <= y + 5 + 12) {
 			EmiApi.displayAllRecipes();
 			MinecraftClient.getInstance().getSoundManager().play(PositionedSoundInstance.master(SoundEvents.UI_BUTTON_CLICK, 1.0f));
@@ -525,6 +592,9 @@ public class RecipeScreen extends Screen {
 
 	@Override
 	public boolean charTyped(char chr, int modifiers) {
+		if (recipeSearchField.isFocused()) {
+			return recipeSearchField.charTyped(chr, modifiers);
+		}
 		if (EmiScreenManager.search.charTyped(chr, modifiers)) {
 			return true;
 		}
@@ -533,10 +603,31 @@ public class RecipeScreen extends Screen {
 
 	@Override
 	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+		// When search is focused, consume all key events to prevent inventory close (E key),
+		// EMI shortcuts, etc. Only Escape/Enter release focus.
+		if (recipeSearchField.isFocused()) {
+			if (keyCode == GLFW.GLFW_KEY_ESCAPE || keyCode == GLFW.GLFW_KEY_ENTER) {
+				recipeSearchField.setFocused(false);
+				return true;
+			}
+			if (EmiConfig.focusRecipeSearch.matchesKey(keyCode, scanCode)) {
+				toggleRecipeSearch();
+				return true;
+			}
+			if (recipeSearchField.keyPressed(keyCode, scanCode, modifiers)) {
+				return true;
+			}
+			return true;
+		}
 		if (keyCode == GLFW.GLFW_KEY_ESCAPE) {
 			this.close();
 			return true;
-		} else if (EmiScreenManager.keyPressed(keyCode, scanCode, modifiers)) {
+		}
+		if (EmiConfig.focusRecipeSearch.matchesKey(keyCode, scanCode)) {
+			focusRecipeSearch();
+			return true;
+		}
+		if (EmiScreenManager.keyPressed(keyCode, scanCode, modifiers)) {
 			return true;
 		} else if (this.client.options.inventoryKey.matchesKey(keyCode, scanCode)) {
 			this.close();
@@ -579,6 +670,74 @@ public class RecipeScreen extends Screen {
 			}
 		}
 		return null;
+	}
+
+	private int getRecipeAreaTop() {
+		return recipeSearchVisible ? 51 : 37;
+	}
+
+	private boolean hasValidTab() {
+		return !tabs.isEmpty() && tab >= 0 && tab < tabs.size();
+	}
+
+	private void applyRecipeFilter(String query) {
+		EmiRecipeCategory currentCategory = null;
+		if (hasValidTab()) {
+			currentCategory = tabs.get(tab).category;
+		}
+		for (RecipeTab t : allTabs) {
+			t.setFilter(query);
+			t.bakePages(backgroundHeight - (recipeSearchVisible ? 14 : 0));
+		}
+		// Rebuild visible tabs
+		tabs.clear();
+		if (query.isEmpty()) {
+			tabs.addAll(allTabs);
+		} else {
+			for (RecipeTab t : allTabs) {
+				if (t.hasFilteredResults()) {
+					tabs.add(t);
+				}
+			}
+		}
+		// Try to stay on current category
+		if (currentCategory != null) {
+			for (int i = 0; i < tabs.size(); i++) {
+				if (tabs.get(i).category == currentCategory) {
+					setPage(tabPage, i, 0);
+					return;
+				}
+			}
+		}
+		// Fall back to first tab
+		if (!tabs.isEmpty()) {
+			setPage(tabPage, 0, 0);
+		} else {
+			currentPage.clear();
+		}
+	}
+
+	private void toggleRecipeSearch() {
+		recipeSearchVisible = !recipeSearchVisible;
+		recipeSearchField.setVisible(recipeSearchVisible);
+		if (recipeSearchVisible) {
+			recipeSearchField.setFocused(true);
+			EmiPort.focus(recipeSearchField, true);
+		} else {
+			recipeSearchField.setFocused(false);
+			recipeSearchField.setText("");
+			recipeSearchQuery = "";
+		}
+		applyRecipeFilter(recipeSearchQuery);
+	}
+
+	private void focusRecipeSearch() {
+		if (!recipeSearchVisible) {
+			toggleRecipeSearch();
+		} else {
+			recipeSearchField.setFocused(true);
+			EmiPort.focus(recipeSearchField, true);
+		}
 	}
 
 	@Override

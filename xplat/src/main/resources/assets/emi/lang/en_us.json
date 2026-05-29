@@ -5,6 +5,7 @@
 
   "key.emi.toggle_visibility": "Toggle Visibility",
   "key.emi.focus_search": "Focus Search",
+  "key.emi.focus_recipe_search": "Focus Recipe Search",
   "key.emi.clear_search": "Clear Search",
   "key.emi.view_recipes": "View Recipes",
   "key.emi.view_uses": "View Uses",
@@ -210,6 +211,8 @@
   "emi.reloading.worry": "§cExperiencing delay, is everything alright?",
   "emi.reloading.still_baking_recipes": "§dBaking recipes...",
   "emi.search": "Search EMI...",
+  "emi.recipe_search": "Search recipes...",
+  "emi.recipe_screen.no_results": "No matching recipes found",
   "emi.search_config": "Search config...",
   "emi.delete_stack": "§cDelete held stack",
   "emi.inapplicable": "Current workstation does not support recipe",

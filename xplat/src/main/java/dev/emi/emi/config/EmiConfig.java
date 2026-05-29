@@ -359,6 +359,10 @@ public class EmiConfig {
 	@ConfigValue("binds.focus-search")
 	public static EmiBind focusSearch = new EmiBind("key.emi.focus_search", EmiInput.CONTROL_MASK, GLFW.GLFW_KEY_F);
 
+	@Comment("Focuses the recipe screen search bar to filter displayed recipes.")
+	@ConfigValue("binds.focus-recipe-search")
+	public static EmiBind focusRecipeSearch = new EmiBind("key.emi.focus_recipe_search", EmiInput.CONTROL_MASK, GLFW.GLFW_KEY_F);
+
 	@Comment("Clears the search bar.")
 	@ConfigValue("binds.clear-search")
 	public static EmiBind clearSearch = new EmiBind("key.emi.clear_search", InputUtil.UNKNOWN_KEY.getCode());

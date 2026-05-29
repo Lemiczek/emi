@@ -7,36 +7,98 @@ import com.google.common.collect.Lists;
 import dev.emi.emi.api.EmiApi;
 import dev.emi.emi.api.recipe.EmiRecipe;
 import dev.emi.emi.api.recipe.EmiRecipeCategory;
+import dev.emi.emi.api.stack.EmiIngredient;
+import dev.emi.emi.api.stack.EmiStack;
 import dev.emi.emi.config.EmiConfig;
 import dev.emi.emi.config.SidebarSide;
+import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 
 public class RecipeTab {
 	private static final int RECIPE_PADDING = 10;
-	private final List<RecipeDisplay> displays;
+	private final List<RecipeDisplay> allDisplays;
+	private List<RecipeDisplay> filteredDisplays;
 	private final int width;
 	private List<List<RecipeDisplay>> pages = Lists.newArrayList();
 	public final EmiRecipeCategory category;
 
 	public RecipeTab(EmiRecipeCategory category, List<EmiRecipe> recipes) {
 		this.category = category;
-		displays = recipes.stream().map(r -> {
+		allDisplays = recipes.stream().map(r -> {
 			try {
 				return new RecipeDisplay(r);
 			} catch (Throwable t) {
 				return new RecipeDisplay(t);
 			}
 		}).toList();
-		width = displays.stream().map(RecipeDisplay::getWidth).max(Integer::compareTo).orElse(0);
+		filteredDisplays = allDisplays;
+		width = allDisplays.stream().map(RecipeDisplay::getWidth).max(Integer::compareTo).orElse(0);
 	}
 
-	public List<WidgetGroup> constructWidgets(int page, int x, int y, int backgroundWidth, int backgroundHeight) {
+	public void setFilter(String query) {
+		if (query == null || query.isEmpty()) {
+			filteredDisplays = allDisplays;
+		} else {
+			String lowerQuery = query.toLowerCase();
+			filteredDisplays = allDisplays.stream().filter(d -> matchesQuery(d, lowerQuery)).toList();
+		}
+	}
+
+	public boolean hasFilteredResults() {
+		return !filteredDisplays.isEmpty();
+	}
+
+	private static boolean matchesQuery(RecipeDisplay display, String query) {
+		if (display.recipe == null) {
+			return false;
+		}
+		EmiRecipe recipe = display.recipe;
+		Identifier id = recipe.getId();
+		if (id != null && id.toString().toLowerCase().contains(query)) {
+			return true;
+		}
+		for (EmiStack stack : recipe.getOutputs()) {
+			if (stackMatchesQuery(stack, query)) {
+				return true;
+			}
+		}
+		for (EmiIngredient ingredient : recipe.getInputs()) {
+			for (EmiStack stack : ingredient.getEmiStacks()) {
+				if (stackMatchesQuery(stack, query)) {
+					return true;
+				}
+			}
+		}
+		for (EmiIngredient ingredient : recipe.getCatalysts()) {
+			for (EmiStack stack : ingredient.getEmiStacks()) {
+				if (stackMatchesQuery(stack, query)) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+	private static boolean stackMatchesQuery(EmiStack stack, String query) {
+		Text name = stack.getName();
+		if (name != null && name.getString().toLowerCase().contains(query)) {
+			return true;
+		}
+		Identifier id = stack.getId();
+		if (id != null && id.toString().toLowerCase().contains(query)) {
+			return true;
+		}
+		return false;
+	}
+
+	public List<WidgetGroup> constructWidgets(int page, int x, int y, int backgroundWidth, int backgroundHeight, int recipeTopOffset) {
 		List<WidgetGroup> groups = Lists.newArrayList();
 		int width = backgroundWidth - 16;
 		int height = getVerticalRecipeSpace(backgroundHeight);
 		int off = 0;
 		for (RecipeDisplay display : pages.get(page)) {
 			int wx = x + 8;
-			int wy = y + 37 + off;
+			int wy = y + recipeTopOffset + off;
 			groups.add(display.getWidgets(wx, wy, width, height));
 			off += display.getHeight() + RECIPE_PADDING;
 		}
@@ -58,7 +120,7 @@ public class RecipeTab {
 		pages.clear();
 		List<RecipeDisplay> current = Lists.newArrayList();
 		int h = 0;
-		for (RecipeDisplay recipe : displays) {
+		for (RecipeDisplay recipe : filteredDisplays) {
 			int rh = recipe.getHeight();
 			if (!current.isEmpty() && h + rh > height) {
 				pages.add(current);

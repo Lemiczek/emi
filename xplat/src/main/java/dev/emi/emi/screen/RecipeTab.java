@@ -79,6 +79,15 @@ public class RecipeTab {
 		return false;
 	}
 
+	static boolean ingredientMatchesQuery(EmiIngredient ingredient, String query) {
+		for (EmiStack stack : ingredient.getEmiStacks()) {
+			if (stackMatchesQuery(stack, query)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	private static boolean stackMatchesQuery(EmiStack stack, String query) {
 		Text name = stack.getName();
 		if (name != null && name.getString().toLowerCase().contains(query)) {

@@ -279,6 +279,21 @@ public class RecipeScreen extends Screen {
 				EmiLog.error("Error rendering widget", e);
 				group.error(e);
 			}
+			if (!recipeSearchQuery.isEmpty()) {
+				for (Widget widget : group.widgets) {
+					if (widget instanceof SlotWidget slot && !slot.getStack().isEmpty()) {
+						if (RecipeTab.ingredientMatchesQuery(slot.getStack(), recipeSearchQuery.toLowerCase())) {
+							Bounds b = slot.getBounds();
+							context.push();
+							context.matrices().translate(0, 0, 200);
+							RenderSystem.colorMask(true, true, true, false);
+							context.fill(b.x() + 1, b.y() + 1, b.width() - 2, b.height() - 2, 0x4400FF00);
+							RenderSystem.colorMask(true, true, true, true);
+							context.pop();
+						}
+					}
+				}
+			}
 			for (Widget widget : group.widgets) {
 				if (widget instanceof RecipeFillButtonWidget) {
 					if (widget.getBounds().contains(mx, my)) {
